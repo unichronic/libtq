@@ -11,6 +11,7 @@ typedef struct {
 
 typedef struct {
     uint8_t *idx;
+    int8_t  *signs;
     float    rnorm;
     int      d;
     int      bits;
@@ -20,6 +21,7 @@ typedef struct {
     int    d;
     int    bits;
     float *rot;
+    float *S;
     tq_cb  cb;
 } tq_ctx;
 
@@ -29,6 +31,7 @@ int    tq_init(tq_ctx *ctx, int d, int bits, unsigned int seed);
 void   tq_free(tq_ctx *ctx);
 tq_vec tq_compress(tq_ctx *ctx, float *v);
 void   tq_decompress(tq_ctx *ctx, tq_vec *cv, float *out);
+float  tq_dot(tq_ctx *ctx, float *query, tq_vec *ck);
 void   tq_vec_free(tq_vec *cv);
 
 #endif

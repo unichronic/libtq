@@ -115,18 +115,21 @@ int tq_init(tq_ctx *ctx, int d, int bits, unsigned int seed) {
     ctx->cb.cents  = malloc(nlvl*sizeof(float));
     ctx->cb.bounds = malloc((nlvl-1)*sizeof(float));
     ctx->rot = malloc(d*d*sizeof(float));
+    ctx->S   = malloc(d*d*sizeof(float));
     solve_lloyd_max(d, bits, ctx->cb.cents, ctx->cb.bounds);
     make_rotation(d, ctx->rot, seed);
+    make_rotation(d, ctx->S,   seed+99999);
     return 0;
 }
 void tq_free(tq_ctx *ctx) {
-    free(ctx->cb.cents); free(ctx->cb.bounds); free(ctx->rot);
+    free(ctx->cb.cents); free(ctx->cb.bounds); free(ctx->rot); free(ctx->S);
 }
 
 tq_vec tq_compress(tq_ctx *ctx, float *v) {
     int d = ctx->d;
     tq_vec cv; cv.d = d; cv.bits = ctx->bits;
-    cv.idx = malloc(d*sizeof(uint8_t));
+    cv.idx   = malloc(d*sizeof(uint8_t));
+    cv.signs = malloc(d*sizeof(int8_t));
     float *rotv = malloc(d*sizeof(float));
     float *recon = malloc(d*sizeof(float));
     mat_vec(ctx->rot, v, rotv, d);
@@ -140,10 +143,14 @@ tq_vec tq_compress(tq_ctx *ctx, float *v) {
         for (int i = 0; i < d; i++) s += ctx->rot[i*d+j]*recon[i];
         recon_orig[j] = s;
     }
+    float *resid = malloc(d*sizeof(float));
     float rn = 0;
-    for (int i = 0; i < d; i++) { float r = v[i]-recon_orig[i]; rn += r*r; }
+    for (int i = 0; i < d; i++) { resid[i] = v[i]-recon_orig[i]; rn += resid[i]*resid[i]; }
     cv.rnorm = sqrtf(rn);
-    free(rotv); free(recon); free(recon_orig);
+    float *proj = malloc(d*sizeof(float));
+    mat_vec(ctx->S, resid, proj, d);
+    for (int i = 0; i < d; i++) cv.signs[i] = (proj[i] >= 0) ? 1 : -1;
+    free(rotv); free(recon); free(recon_orig); free(resid); free(proj);
     return cv;
 }
 void tq_decompress(tq_ctx *ctx, tq_vec *cv, float *out) {
@@ -157,4 +164,18 @@ void tq_decompress(tq_ctx *ctx, tq_vec *cv, float *out) {
     }
     free(recon);
 }
-void tq_vec_free(tq_vec *cv) { free(cv->idx); }
+float tq_dot(tq_ctx *ctx, float *query, tq_vec *ck) {
+    int d = ctx->d;
+    float *rotq = malloc(d*sizeof(float));
+    mat_vec(ctx->rot, query, rotq, d);
+    float t1 = 0;
+    for (int i = 0; i < d; i++) t1 += rotq[i]*ctx->cb.cents[ck->idx[i]];
+    float *sq = malloc(d*sizeof(float));
+    mat_vec(ctx->S, query, sq, d);
+    float qjl = 0;
+    for (int i = 0; i < d; i++) qjl += sq[i]*ck->signs[i];
+    float t2 = ck->rnorm * sqrtf(3.14159265f/2.0f) / d * qjl;
+    free(rotq); free(sq);
+    return t1 + t2;
+}
+void tq_vec_free(tq_vec *cv) { free(cv->idx); free(cv->signs); }
