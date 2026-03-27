@@ -1,8 +1,8 @@
 # libtq
 
-C library for compressing high-dimensional float vectors to 2-4 bits per dimension and searching over them without decompressing. Uses a two-stage algorithm — optimal scalar quantization after a random rotation, plus a 1-bit residual correction that keeps dot product estimates unbiased.
+C library for compressing high-dimensional float vectors to 2-4 bits per dimension and searching over them without decompressing. Uses a two-stage algorithm: optimal scalar quantization after a random rotation, plus a 1-bit residual correction that keeps dot product estimates unbiased.
 
-Useful anywhere you need to store a lot of vectors cheaply and still run fast approximate similarity search over them — embedding databases, vector search engines, or as a building block for ANN indexes.
+Useful anywhere you need to store a lot of vectors cheaply and still run fast approximate similarity search over them: embedding databases, vector search engines, or as a building block for ANN indexes.
 
 ## How it works
 
@@ -59,8 +59,8 @@ Use `-norm` flag if your vectors are not already unit-normalized (e.g. raw SIFT 
 ## Benchmarks
 
 Tested on a standard CPU. Two datasets:
-- **SIFT1M** (100K subset, d=128) — raw SIFT descriptors, normalized. Non-Gaussian distribution, harder case.
-- **GloVe-100** (100K subset, d=100) — word embedding vectors, already unit-normalized. Better fit for the algorithm.
+- **SIFT1M** (100K subset, d=128): raw SIFT descriptors, normalized. Non-Gaussian distribution, harder case.
+- **GloVe-100** (100K subset, d=100): word embedding vectors, already unit-normalized. Better fit for the algorithm.
 
 ### Compression
 
@@ -80,7 +80,7 @@ Tested on a standard CPU. Two datasets:
 | 3    | 7.3x  | 0.57s      | 23%                  |
 | 4    | 6.0x  | 0.65s      | 21%                  |
 
-Higher error on SIFT is expected — SIFT descriptors are histogram-based with non-Gaussian distributions. Embedding vectors (GloVe, sentence embeddings, etc.) fit the algorithm's assumptions much better.
+Higher error on SIFT is expected: SIFT descriptors are histogram-based with non-Gaussian distributions. Embedding vectors (GloVe, sentence embeddings, etc.) fit the algorithm's assumptions much better.
 
 ### Search (brute-force, 10 queries over 100K vectors)
 
@@ -96,21 +96,4 @@ Search is brute-force O(N) over compressed vectors. No decompression during sear
 
 ```
 ./test_tq
-```
-
-## API
-
-```c
-int    tq_init(tq_ctx *ctx, int d, int bits, unsigned int seed);
-void   tq_free(tq_ctx *ctx);
-tq_vec tq_compress(tq_ctx *ctx, float *v);
-void   tq_vec_free(tq_vec *cv);
-float  tq_dot(tq_ctx *ctx, float *query, tq_vec *ck);
-void   tq_decompress(tq_ctx *ctx, tq_vec *cv, float *out);
-
-int    tq_db_build(tq_db *db, float *vecs, int n, int d, int bits, unsigned int seed);
-void   tq_db_free(tq_db *db);
-void   tq_search(tq_db *db, float *query, int topk, int *results);
-int    tq_db_save(tq_db *db, const char *path);
-int    tq_db_load(tq_db *db, const char *path);
 ```
