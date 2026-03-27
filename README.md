@@ -58,9 +58,13 @@ Use `-norm` flag if your vectors are not already unit-normalized (e.g. raw SIFT 
 
 ## Benchmarks
 
-Tested on SIFT1M base subset (100K vectors, d=128) on a standard CPU:
+Tested on a standard CPU. Two datasets:
+- **SIFT1M** (100K subset, d=128) — raw SIFT descriptors, normalized. Non-Gaussian distribution, harder case.
+- **GloVe-100** (100K subset, d=100) — word embedding vectors, already unit-normalized. Better fit for the algorithm.
 
 ### Compression
+
+**SIFT1M** (d=128, normalized):
 
 | bits | ratio | build time | dot error (relative) |
 |------|-------|------------|----------------------|
@@ -68,15 +72,23 @@ Tested on SIFT1M base subset (100K vectors, d=128) on a standard CPU:
 | 3    | 7.5x  | 0.40s      | 54%                  |
 | 4    | 6.1x  | 0.46s      | 47%                  |
 
-Compression ratio is measured against original float32. Higher error on SIFT is expected — SIFT descriptors are histogram-based with non-Gaussian distributions that don't fit the codebook assumption as well as embedding vectors do.
+**GloVe-100** (d=100, unit-normalized embeddings):
+
+| bits | ratio | build time | dot error (relative) |
+|------|-------|------------|----------------------|
+| 2    | 9.5x  | 0.51s      | 27%                  |
+| 3    | 7.3x  | 0.57s      | 23%                  |
+| 4    | 6.0x  | 0.65s      | 21%                  |
+
+Higher error on SIFT is expected — SIFT descriptors are histogram-based with non-Gaussian distributions. Embedding vectors (GloVe, sentence embeddings, etc.) fit the algorithm's assumptions much better.
 
 ### Search (brute-force, 10 queries over 100K vectors)
 
-| bits | time  |
-|------|-------|
-| 2    | 1.2s  |
-| 3    | 1.7s  |
-| 4    | 2.2s  |
+| bits | SIFT time | GloVe time |
+|------|-----------|------------|
+| 2    | 1.2s      | 1.9s       |
+| 3    | 1.7s      | 2.7s       |
+| 4    | 2.2s      | 3.5s       |
 
 Search is brute-force O(N) over compressed vectors. No decompression during search. Uses precomputed distance lookup tables and unpacked scan buffers to avoid bit manipulation in the hot loop.
 
