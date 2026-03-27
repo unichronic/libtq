@@ -59,6 +59,8 @@ static void normalize(float *vecs, int n, int d) {
 }
 
 static void usage(void) {
+    puts("tq build    <vecs> <bits> <out.tqb> [-norm]");
+    puts("tq search   <index.tqb> <query_vec> <topk> [-norm]");
     puts("tq compress <vecs> <bits> <out.tqb> [-norm]");
     puts("tq dot      <vecs> <bits> <query_idx> [-norm]");
     puts("tq bench    <vecs> <bits> [-norm]");
@@ -67,7 +69,44 @@ static void usage(void) {
 int main(int argc, char **argv) {
     if (argc < 2) { usage(); return 1; }
 
-    if (strcmp(argv[1], "compress") == 0) {
+    if (strcmp(argv[1], "build") == 0) {
+        if (argc < 5) { usage(); return 1; }
+        int n, d;
+        float *vecs = load_vecs(argv[2], &n, &d);
+        if (!vecs) return 1;
+        int bits = atoi(argv[3]);
+        if (argc > 5 && strcmp(argv[5], "-norm") == 0) normalize(vecs, n, d);
+        tq_db db;
+        if (tq_db_build(&db, vecs, n, d, bits, 42) != 0) { fprintf(stderr, "build failed\n"); return 1; }
+        if (tq_db_save(&db, argv[4]) != 0) return 1;
+        long orig = (long)n*d*4;
+        long ibytes = (long)n*((d*bits+7)/8);
+        long sbytes = (long)n*((d+7)/8);
+        long comp = ibytes + sbytes + n*4;
+        printf("built index: %d vecs d=%d bits=%d\n", n, d, bits);
+        printf("orig=%ld bytes  comp=%ld bytes  ratio=%.1fx\n", orig, comp, (double)orig/comp);
+        tq_db_free(&db); free(vecs);
+
+    } else if (strcmp(argv[1], "search") == 0) {
+        if (argc < 5) { usage(); return 1; }
+        tq_db db;
+        if (tq_db_load(&db, argv[2]) != 0) return 1;
+        int n, d;
+        float *queries = load_vecs(argv[3], &n, &d);
+        if (!queries) return 1;
+        int topk = atoi(argv[4]);
+        if (argc > 5 && strcmp(argv[5], "-norm") == 0) normalize(queries, n, d);
+        if (d != db.ctx.d) { fprintf(stderr, "dim mismatch\n"); return 1; }
+        int *results = malloc(topk * sizeof(int));
+        for (int q = 0; q < n; q++) {
+            tq_search(&db, queries + q*d, topk, results);
+            printf("query %d -> [", q);
+            for (int i = 0; i < topk; i++) printf("%d%s", results[i], i<topk-1?", ":"");
+            printf("]\n");
+        }
+        free(results); free(queries); tq_db_free(&db);
+
+    } else if (strcmp(argv[1], "compress") == 0) {
         if (argc < 5) { usage(); return 1; }
         int n, d;
         float *vecs = load_vecs(argv[2], &n, &d);

@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stdio.h>
 #include "tq.h"
 
 // fp16 conversion - doing manually because dont want to pull in any lib
@@ -258,4 +259,125 @@ void tq_decompress(tq_ctx *ctx, tq_vec *cv, float *out) {
     srht_T(recon_rot, ctx->rsign, tmp, dp);
     memcpy(out, tmp, d*sizeof(float));
     free(recon_rot); free(tmp);
+}
+
+int tq_db_build(tq_db *db, float *vecs, int n, int d, int bits, unsigned int seed) {
+    if (tq_init(&db->ctx, d, bits, seed) != 0) return -1;
+    db->n = n;
+    int ibytes = (d*bits + 7) / 8;
+    int sbytes = (d + 7) / 8;
+    db->ibuf   = malloc((long)n * ibytes);
+    db->sbuf   = malloc((long)n * sbytes);
+    db->rnorms = malloc(n * sizeof(float));
+    if (!db->ibuf || !db->sbuf || !db->rnorms) return -1;
+    for (int i = 0; i < n; i++) {
+        tq_vec cv = tq_compress(&db->ctx, vecs + i*d);
+        memcpy(db->ibuf + (long)i*ibytes, cv.ibuf, ibytes);
+        memcpy(db->sbuf + (long)i*sbytes, cv.sbuf, sbytes);
+        db->rnorms[i] = f16_to_f32(cv.rnorm16);
+        tq_vec_free(&cv);
+    }
+    return 0;
+}
+
+void tq_db_free(tq_db *db) {
+    tq_free(&db->ctx);
+    free(db->ibuf); free(db->sbuf); free(db->rnorms);
+}
+
+// dot product directly against db row without making a tq_vec
+static float db_dot(tq_db *db, float *rotq, float *sq, int i) {
+    int d = db->ctx.d, bits = db->ctx.bits;
+    int ibytes = (d*bits + 7) / 8;
+    int sbytes = (d + 7) / 8;
+    uint8_t *ib = db->ibuf + (long)i*ibytes;
+    uint8_t *sb = db->sbuf + (long)i*sbytes;
+    float t1 = 0;
+    for (int j = 0; j < d; j++)
+        t1 += rotq[j] * db->ctx.cb.cents[unpack_bits(ib, j, bits)];
+    float qjl = 0;
+    for (int j = 0; j < d; j++) {
+        int sign = ((sb[j/8] >> (j%8)) & 1) ? 1 : -1;
+        qjl += sq[j] * sign;
+    }
+    float scale = sqrtf(3.14159265f/2.0f) / d;
+    return t1 + db->rnorms[i] * scale * qjl;
+}
+
+void tq_search(tq_db *db, float *query, int topk, int *results) {
+    int d = db->ctx.d, dp = db->ctx.dp;
+    float *qp = calloc(dp, sizeof(float));
+    memcpy(qp, query, d*sizeof(float));
+    float *rotq = malloc(dp*sizeof(float));
+    float *sq   = malloc(dp*sizeof(float));
+    srht(qp, db->ctx.rsign, rotq, dp);
+    srht(qp, db->ctx.ssign, sq,   dp);
+
+    float *best_scores = malloc(topk * sizeof(float));
+    for (int i = 0; i < topk; i++) { results[i] = -1; best_scores[i] = -1e30f; }
+
+    for (int i = 0; i < db->n; i++) {
+        float score = db_dot(db, rotq, sq, i);
+        // find worst slot in top-k
+        int worst = 0;
+        for (int j = 1; j < topk; j++)
+            if (best_scores[j] < best_scores[worst]) worst = j;
+        if (score > best_scores[worst]) {
+            best_scores[worst] = score;
+            results[worst] = i;
+        }
+    }
+    free(qp); free(rotq); free(sq); free(best_scores);
+}
+
+// file format: [d,dp,bits,n,nlvl] then codebook cents+bounds, rsign, ssign, ibuf, sbuf, rnorms
+int tq_db_save(tq_db *db, const char *path) {
+    FILE *f = fopen(path, "wb");
+    if (!f) { perror(path); return -1; }
+    int d = db->ctx.d, dp = db->ctx.dp, bits = db->ctx.bits;
+    int n = db->n, nlvl = db->ctx.cb.nlvl;
+    fwrite(&d,    4, 1, f); fwrite(&dp,   4, 1, f);
+    fwrite(&bits, 4, 1, f); fwrite(&n,    4, 1, f);
+    fwrite(&nlvl, 4, 1, f);
+    fwrite(db->ctx.cb.cents,  4, nlvl,   f);
+    fwrite(db->ctx.cb.bounds, 4, nlvl-1, f);
+    fwrite(db->ctx.rsign, sizeof(int), dp, f);
+    fwrite(db->ctx.ssign, sizeof(int), dp, f);
+    long ibytes = (long)n * ((d*bits+7)/8);
+    long sbytes = (long)n * ((d+7)/8);
+    fwrite(db->ibuf,   1, ibytes, f);
+    fwrite(db->sbuf,   1, sbytes, f);
+    fwrite(db->rnorms, 4, n,      f);
+    fclose(f);
+    return 0;
+}
+
+int tq_db_load(tq_db *db, const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) { perror(path); return -1; }
+    int d, dp, bits, n, nlvl;
+    fread(&d, 4, 1, f); fread(&dp,   4, 1, f);
+    fread(&bits, 4, 1, f); fread(&n, 4, 1, f);
+    fread(&nlvl, 4, 1, f);
+    db->ctx.d = d; db->ctx.dp = dp; db->ctx.bits = bits;
+    db->ctx.cb.nlvl   = nlvl;
+    db->ctx.cb.cents  = malloc(nlvl*4);
+    db->ctx.cb.bounds = malloc((nlvl-1)*4);
+    db->ctx.rsign = malloc(dp*sizeof(int));
+    db->ctx.ssign = malloc(dp*sizeof(int));
+    fread(db->ctx.cb.cents,  4, nlvl,   f);
+    fread(db->ctx.cb.bounds, 4, nlvl-1, f);
+    fread(db->ctx.rsign, sizeof(int), dp, f);
+    fread(db->ctx.ssign, sizeof(int), dp, f);
+    db->n = n;
+    long ibytes = (long)n * ((d*bits+7)/8);
+    long sbytes = (long)n * ((d+7)/8);
+    db->ibuf   = malloc(ibytes);
+    db->sbuf   = malloc(sbytes);
+    db->rnorms = malloc(n*4);
+    fread(db->ibuf,   1, ibytes, f);
+    fread(db->sbuf,   1, sbytes, f);
+    fread(db->rnorms, 4, n,      f);
+    fclose(f);
+    return 0;
 }
