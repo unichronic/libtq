@@ -285,25 +285,6 @@ void tq_db_free(tq_db *db) {
     free(db->ibuf); free(db->sbuf); free(db->rnorms);
 }
 
-// dot product directly against db row without making a tq_vec
-static float db_dot(tq_db *db, float *rotq, float *sq, int i) {
-    int d = db->ctx.d, bits = db->ctx.bits;
-    int ibytes = (d*bits + 7) / 8;
-    int sbytes = (d + 7) / 8;
-    uint8_t *ib = db->ibuf + (long)i*ibytes;
-    uint8_t *sb = db->sbuf + (long)i*sbytes;
-    float t1 = 0;
-    for (int j = 0; j < d; j++)
-        t1 += rotq[j] * db->ctx.cb.cents[unpack_bits(ib, j, bits)];
-    float qjl = 0;
-    for (int j = 0; j < d; j++) {
-        int sign = ((sb[j/8] >> (j%8)) & 1) ? 1 : -1;
-        qjl += sq[j] * sign;
-    }
-    float scale = sqrtf(3.14159265f/2.0f) / d;
-    return t1 + db->rnorms[i] * scale * qjl;
-}
-
 void tq_search(tq_db *db, float *query, int topk, int *results) {
     int d = db->ctx.d, dp = db->ctx.dp;
     int bits = db->ctx.bits, nlvl = db->ctx.cb.nlvl;

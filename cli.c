@@ -59,11 +59,18 @@ static void normalize(float *vecs, int n, int d) {
 }
 
 static void usage(void) {
-    puts("tq build    <vecs> <bits> <out.tqb> [-norm]");
-    puts("tq search   <index.tqb> <query_vec> <topk> [-norm]");
-    puts("tq compress <vecs> <bits> <out.tqb> [-norm]");
-    puts("tq dot      <vecs> <bits> <query_idx> [-norm]");
-    puts("tq bench    <vecs> <bits> [-norm]");
+    puts("usage:");
+    puts("  tq build  <vecs> <bits> <index.tqb> [-norm]   compress vectors and save index");
+    puts("  tq search <index.tqb> <query.fvecs> <topk> [-norm]   find nearest vectors");
+    puts("");
+    puts("  bits: 2, 3, or 4  (higher = better accuracy, less compression)");
+    puts("  -norm: normalize vectors before compressing (use for raw descriptors like SIFT)");
+    puts("");
+    puts("  input formats: .fvecs  .npy  .fbin  or raw [N:i32][D:i32][N*D f32]");
+    puts("");
+    puts("dev/debug:");
+    puts("  tq dot   <vecs> <bits> <query_idx> [-norm]   compare true vs estimated dot products");
+    puts("  tq bench <vecs> <bits> [-norm]               measure compression error across all vecs");
 }
 
 int main(int argc, char **argv) {

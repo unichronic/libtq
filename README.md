@@ -30,31 +30,35 @@ make
 
 ## Usage
 
-Build a searchable index:
+Step 1 - build an index from your vectors:
 ```
-./tq build vecs.bin <bits> index.tqb [-norm]
-```
-
-Search the index:
-```
-./tq search index.tqb query.bin <topk> [-norm]
+./tq build vecs.fvecs 3 index.tqb
 ```
 
-Check dot product accuracy:
+Step 2 - search the index with a query file:
 ```
-./tq dot vecs.bin <bits> <query_idx>
-```
-
-Benchmark error across all vectors:
-```
-./tq bench vecs.bin <bits>
+./tq search index.tqb query.fvecs 10
 ```
 
-`bits` is typically 2, 3, or 4. Higher = better accuracy, less compression.
+That's it. The index file can be reloaded and searched without rebuilding.
+
+`bits` controls the compression/accuracy tradeoff: 2 = most compressed, 4 = most accurate. 3 is a good default.
+
+Add `-norm` if your vectors are not already unit-normalized (e.g. raw SIFT descriptors). Embedding vectors from models are usually already normalized.
 
 Supported input formats: `.fvecs`, `.npy`, `.fbin`, raw binary `[N: int32][D: int32][N*D float32]`
 
-Use `-norm` flag if your vectors are not already unit-normalized (e.g. raw SIFT descriptors).
+### Debug commands
+
+Check how accurate the dot product estimates are:
+```
+./tq dot vecs.fvecs 3 0
+```
+
+Measure average compression error across all vectors:
+```
+./tq bench vecs.fvecs 3
+```
 
 ## Benchmarks
 
