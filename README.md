@@ -52,7 +52,33 @@ Benchmark error across all vectors:
 
 `bits` is typically 2, 3, or 4. Higher = better accuracy, less compression.
 
-Input format for `vecs.bin`: `[N: int32][D: int32][N*D float32]`
+Supported input formats: `.fvecs`, `.npy`, `.fbin`, raw binary `[N: int32][D: int32][N*D float32]`
+
+Use `-norm` flag if your vectors are not already unit-normalized (e.g. raw SIFT descriptors).
+
+## Benchmarks
+
+Tested on SIFT1M base subset (100K vectors, d=128) on a standard CPU:
+
+### Compression
+
+| bits | ratio | build time | dot error (relative) |
+|------|-------|------------|----------------------|
+| 2    | 9.8x  | 0.37s      | 63%                  |
+| 3    | 7.5x  | 0.40s      | 54%                  |
+| 4    | 6.1x  | 0.46s      | 47%                  |
+
+Compression ratio is measured against original float32. Higher error on SIFT is expected — SIFT descriptors are histogram-based with non-Gaussian distributions that don't fit the codebook assumption as well as embedding vectors do.
+
+### Search (brute-force, 10 queries over 100K vectors)
+
+| bits | time  |
+|------|-------|
+| 2    | 1.2s  |
+| 3    | 1.7s  |
+| 4    | 2.2s  |
+
+Search is brute-force O(N) over compressed vectors. No decompression during search. Uses precomputed distance lookup tables and unpacked scan buffers to avoid bit manipulation in the hot loop.
 
 ## Run tests
 

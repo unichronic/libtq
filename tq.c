@@ -306,6 +306,10 @@ static float db_dot(tq_db *db, float *rotq, float *sq, int i) {
 
 void tq_search(tq_db *db, float *query, int topk, int *results) {
     int d = db->ctx.d, dp = db->ctx.dp;
+    int bits = db->ctx.bits, nlvl = db->ctx.cb.nlvl;
+    int ibytes = (d*bits+7)/8;
+    int sbytes = (d+7)/8;
+
     float *qp = calloc(dp, sizeof(float));
     memcpy(qp, query, d*sizeof(float));
     float *rotq = malloc(dp*sizeof(float));
@@ -313,21 +317,61 @@ void tq_search(tq_db *db, float *query, int topk, int *results) {
     srht(qp, db->ctx.rsign, rotq, dp);
     srht(qp, db->ctx.ssign, sq,   dp);
 
+    // precompute lut[j*nlvl + c] = rotq[j] * centroid[c]
+    // inner loop becomes table lookup instead of multiply
+    float *lut = malloc(d * nlvl * sizeof(float));
+    for (int j = 0; j < d; j++)
+        for (int c = 0; c < nlvl; c++)
+            lut[j*nlvl + c] = rotq[j] * db->ctx.cb.cents[c];
+
+    // unpack all codes to flat uint8 once - avoids bit manipulation in hot loop
+    // trades memory (n*d bytes) for speed, same trick faiss uses for PQ scan
+    uint8_t *codes_flat = malloc((long)db->n * d);
+    for (int i = 0; i < db->n; i++)
+        for (int j = 0; j < d; j++)
+            codes_flat[(long)i*d + j] = unpack_bits(db->ibuf + (long)i*ibytes, j, bits);
+
+    // precompute sq as int8 signs for qjl - avoids bit extract in hot loop
+    // sign_flat[i*d+j] = +1 or -1
+    int8_t *sign_flat = malloc((long)db->n * d);
+    for (int i = 0; i < db->n; i++)
+        for (int j = 0; j < d; j++)
+            sign_flat[(long)i*d + j] = ((db->sbuf[(long)i*sbytes + j/8] >> (j%8)) & 1) ? 1 : -1;
+
+    float scale = sqrtf(3.14159265f/2.0f) / d;
+
     float *best_scores = malloc(topk * sizeof(float));
     for (int i = 0; i < topk; i++) { results[i] = -1; best_scores[i] = -1e30f; }
+    float worst_score = -1e30f;
 
     for (int i = 0; i < db->n; i++) {
-        float score = db_dot(db, rotq, sq, i);
-        // find worst slot in top-k
-        int worst = 0;
-        for (int j = 1; j < topk; j++)
-            if (best_scores[j] < best_scores[worst]) worst = j;
-        if (score > best_scores[worst]) {
+        uint8_t *codes = codes_flat + (long)i*d;
+        int8_t  *signs = sign_flat  + (long)i*d;
+
+        float t1 = 0;
+        for (int j = 0; j < d; j++)
+            t1 += lut[j*nlvl + codes[j]];
+
+        float qjl = 0;
+        for (int j = 0; j < d; j++)
+            qjl += sq[j] * signs[j];
+
+        float score = t1 + db->rnorms[i] * scale * qjl;
+
+        if (score > worst_score) {
+            int worst = 0;
+            for (int j = 1; j < topk; j++)
+                if (best_scores[j] < best_scores[worst]) worst = j;
             best_scores[worst] = score;
             results[worst] = i;
+            worst_score = best_scores[0];
+            for (int j = 1; j < topk; j++)
+                if (best_scores[j] < worst_score) worst_score = best_scores[j];
         }
     }
-    free(qp); free(rotq); free(sq); free(best_scores);
+
+    free(qp); free(rotq); free(sq); free(lut);
+    free(codes_flat); free(sign_flat); free(best_scores);
 }
 
 // file format: [d,dp,bits,n,nlvl] then codebook cents+bounds, rsign, ssign, ibuf, sbuf, rnorms
